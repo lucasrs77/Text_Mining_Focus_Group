@@ -1,0 +1,976 @@
+---
+title: "Text Analysis en Focus Group"
+author: "Lucas Rodríguez Saa"
+output:
+  html_document:
+    toc: yes
+    highlight: tango
+    theme: spacelab
+    fig_caption: yes
+    number_sections: yes
+  pdf_document:
+    toc: yes
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, fig.align='center')
+
+```
+
+## Introducción
+
+En este documento hacemos un breve análisis y guía para aplicar Text Analysis y algoritmos de Topic Modeling para el análisis de Focus Group. Utlizaremos como fuente de datos 26 desgrabaciones.
+   
+El objetivo, y principal desafío, es incorporar herramientas computacionales y estadísticas al análisis cualitativo tradicional. Desde ya, las herramientas son complementarias y este enfoque que nos permiten las nuevas tecnologías podrían enriquecer el análisis enormemente.
+
+#### Paquetes
+
+En primer lugar, intalamos el paquete `pacman`
+
+```{r, eval=FALSE}
+install.packages("pacman")
+```
+
+Con la función `library()` "activamos" el paquete.
+
+La función `p_load` instalará y activará todos los paquetes que no tengamos.
+
+```{r}
+library("pacman")  
+
+p_load(tidyverse, ggplot2, tm, textreadr, 
+       tidytext, scales, wordcloud, igraph,
+       ggraph, widyr, topicmodels, prettydoc,
+       rticles, xaringan, devtools, here)
+
+```
+
+## Llevando los datos a R
+
+Para comenzar a trabajar con los datos creamos un objeto que luego nos servirá para leer todos los documentos. El objeto `f` lista la ubicación de todos los archivos. Mediante la función `file.path()` ubicamos la carpeta común que contiene los documentos, luego concatenamos con la función `c()` todos los archivos.
+
+En nuestro caso, teníamos ordenados los documentos en subcarpetas por ciudad donde se realizó el Focus Group así que debemos agregar esa primer subcarpeta. Afortunadamete, en RStudio podemos usar atajos: si ya escribimos las funciones, nos paramos en el medio de dos comillas `""` y apretamos TAB en el teclado. Rápidamente elegiremos la subcarpeta y el archivo.
+
+Imprimimos el objeto `f`
+
+```{r}
+(f <- file.path("/cloud/project/degrab/", ## carpeta con los archivos
+               
+                 ## primero la subcarpeta que refiere a los focus de cordoba capital
+                
+                c("Capital/CAPITAL GRUPO 4.docx", 
+                  "Capital/CAPITAL GRUPO 5.docx", ## seleccion de archivos
+                  "Capital/CAPITAL GRUPO 6.docx",
+                  "Capital/CAPITAL GRUPO 7.docx",
+                  "Capital/CAPITAL GRUPO 8.docx",
+                  "Capital/CAPITAL GRUPO 9.docx",
+                  "Capital/G1 - JxC - Jóvenes- C3D1 21.03.docx",
+                  "Capital/G2 - JxC - Adultos - C3D1 21.03.docx",
+                  "Capital/G3 - Mix.docx", 
+                  "Rio cuarto/G6 - JxC - 35 a 50 años - alto_medio.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 1.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 3.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 4.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 5.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 7.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 8.docx",
+                  "Rio cuarto/RIO CUARTO GRUPO 9.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 1.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 2.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 3.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 4.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 5.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 6.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 7.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 8.docx",
+                  "San francisco/SAN FRANCISCO GRUPO 9.docx"
+                )))
+```
+
+#### Leemos los datos
+
+Ahora aplicamos la función `lapply` para leer todos los documentos y los guardamos en el objeto `d`, luego vemos cómo está estructurado.
+
+La sintaxis de `lapply` es sencilla: se pone el nombre del objeto `f` y luego la función que se aplicará a dicho objeto, en este caso sería `read_document()`.
+
+`read_document()` es una función genérica del paquete `{textreadr}` para leer archivos con extensión .pdf, .txt, .html, .rtf, .docx, o .doc.
+
+```{r}
+d <- lapply(f, read_document)
+
+str(d)
+```
+
+El objeto `d` es una lista de 26 con el contenido de cada documento guardado. Para acceder a un documento la sintaxis es: `d[[1]]`, y nos imprime el documento 1 como texto plano.
+
+Para construir los df podemos ver las variables de control y sumarlas al conjunto de datos, como en el siguiente ejemplo:
+
+```{r echo=TRUE}
+d[[1]][2] ## tomamos la línea 2 del objeto 1 de la lista d
+```
+
+En todas las desgrabaciones es igual, así que podemos utilizar esta segmentación para agregar variables de control a nuestros datos.
+
+Creamos un objeto con el primer focus y las variables de control que surgen de la línea de código anterior.
+
+Entonces tendremos las siguientes variables en nuestro dataset:
+
+-   **text**: texto plano
+
+-   **n_focus**: ID del focus group, compuesto por la palabra focus y un número
+
+-   **ciudad:** donde se realizó el focus, hay 3 categorías: Córdoba, Río Cuarto y San Francisco
+
+-   **NSE:** Nivel socioeconómico, tiene tres categorías: medio - bajo, medio - alto y mixto para el grupo de control
+
+-   **Voto**: a quién votó en 2019, hay tres categorías: HxC (Hacemos por cordoba), JxC (Juntos por el cambio) y mixto para el grupo de control
+
+-   **Edad**: rango etareo, hay tres categorías: 20 - 30 años, 35 - 50 años y mixto para el grupo de control
+
+-   **linea**: enumera las lineas de cada focus
+
+```{r echo=TRUE}
+          ## seleccion del primer documento
+text_1 <- tibble(text = d[[1]]) %>% 
+  
+  cbind(n_focus = "focus1", ## asignacion categorica 
+        
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        
+        NSE = "medio - alto", ## asignacion Nivel socio económico
+        
+        Voto = "HxC", ## voto 2019
+        
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  
+        mutate(linea = row_number() ## n linea en el documento
+               )
+
+head(text_1)
+```
+
+Por una cuestión de cómodidad y orden, vamos a repetir el proceso como se muestra a continuación pero no se mostrará el output.
+
+```{r, echo=TRUE, results='hide'}
+text_2 <- tibble(text = d[[2]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus2", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+text_3 <- tibble(text = d[[3]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus3", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[4]][2]
+text_4 <- tibble(text = d[[4]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus4", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[5]][2]
+text_5 <- tibble(text = d[[5]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus5", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[6]][2]
+text_6 <- tibble(text = d[[6]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus6", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[7]][2]
+text_7 <- tibble(text = d[[7]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus7", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[8]][2]
+text_8 <- tibble(text = d[[8]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus8", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[9]][2]
+text_9 <- tibble(text = d[[9]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus9", ## asignacion categorica 
+        ciudad = "Cordoba", ## asignacion de la ciudad
+        NSE = "mixto", ## asignacion Nivel socio econ?mico
+        Voto = "mixto", ## voto 2019
+        Edad = "mixto") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[10]][2]
+text_10 <- tibble(text = d[[10]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus10", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[11]][2]
+text_11 <- tibble(text = d[[11]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus11", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[12]][2]
+text_12 <- tibble(text = d[[12]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus12", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[13]][2]
+text_13 <- tibble(text = d[[13]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus13", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[14]][2]
+text_14 <- tibble(text = d[[14]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus14", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[15]][2]
+text_15 <- tibble(text = d[[15]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus15", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[16]][2]
+text_16 <- tibble(text = d[[16]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus16", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[17]][2]
+text_17 <- tibble(text = d[[17]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus17", ## asignacion categorica 
+        ciudad = "Rio Cuarto", ## asignacion de la ciudad
+        NSE = "mixto", ## asignacion Nivel socio econ?mico
+        Voto = "mixto", ## voto 2019
+        Edad = "mixto") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[18]][2]
+text_18 <- tibble(text = d[[18]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus18", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[19]][2]
+text_19 <- tibble(text = d[[19]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus19", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[20]][2]
+text_20 <- tibble(text = d[[20]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus20", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[21]][2]
+text_21 <- tibble(text = d[[21]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus21", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "HxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[22]][2]
+text_22 <- tibble(text = d[[22]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus22", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[23]][2]
+text_23 <- tibble(text = d[[23]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus23", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - alto", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[24]][2]
+text_24 <- tibble(text = d[[24]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus24", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "20 - 30 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[25]][2]
+text_25 <- tibble(text = d[[25]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus25", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "medio - bajo", ## asignacion Nivel socio econ?mico
+        Voto = "JxC", ## voto 2019
+        Edad = "35 - 50 años") %>%  ## rango etareo
+  mutate(linea = row_number())
+
+d[[26]][2]
+text_26 <- tibble(text = d[[26]]) %>% ## seleccion del primer documento
+  cbind(n_focus = "focus26", ## asignacion categorica 
+        ciudad = "San Francisco", ## asignacion de la ciudad
+        NSE = "mixto", ## asignacion Nivel socio econ?mico
+        Voto = "mixto", ## voto 2019
+        Edad = "mixto") %>%  ## rango etareo
+  mutate(linea = row_number())
+```
+
+#### Creamos un DF con múltiples documentos
+
+Ahora tendríamos que unir todos los data frame en un conjunto de datos que tenga todos los documentos.
+
+Creamos un objeto `Names` con la función `ls()` para detectar los DF. Esta función, con el argumento `pattern` identifica los objetos en nuestro ambiente cuyo nombre comience con text\_ y luego un número del 1 al 99. El sombrerito \^ da a entender que debe comenzar con la siguiente información.
+
+```{r}
+Names <- ls(pattern = "^text_[1-99]")
+Names
+```
+
+El objeto `L` crea una lista, pero esta vez con todos los data frame
+
+```{r}
+L <- mget(Names)
+```
+
+Finalmente, creamos el objeto df_text donde unificamos todos los data frame.
+
+Se aplica la función `rbind()` a los objetos en L. `rbind()` pega las filas (row) de los dataframe. Es decir, r de row y bind de unir. Entonces, el contenido de cada dataframe se va pegando abajo.
+
+Vemos los primeros datos con `head()` y la estructura del objeto con `str()`
+
+```{r}
+df_text <- do.call("rbind", L)
+
+head(df_text)
+str(df_text)
+```
+
+También podemos usar está alternativa que coerciona la lista a un data frame. El inconveniente es que no nos servirá para aplicar Topic Modeling por que, como veremos más adelante, la identificación de topicos es también entre distintos documentos.
+
+```{r}
+df_sin_var_control <- data.frame(matrix(unlist(d)))
+
+head(df_sin_var_control)
+str(df_sin_var_control)
+```
+
+## Tokenización
+
+La tokenización reduce las unidades de análisis según la conveniencia para el análisis. En este caso lo llevamos a la expresión mínima de palabra. Usamos la función `unnest_tokens()` del paquete `tidytext`. Ahora el DF tendrá dividido cada linea del texto en múltiples filas, una por cada palabra.
+
+```{r}
+focus_tokenizado <- df_text %>% 
+  unnest_tokens(word, text) # tokenización
+```
+
+Ahora tenemos nuestros datos llevados a palabras.
+
+#### Eliminar stopwords
+
+Es conveniente eliminar una serie de palabras que son comunes y no aportan al análisis. La función `stopwords()` viene en el paquete `tm` y devuelve un data frame con un diccionario de stop words. El único argumento es el idioma, en este caso español "es".
+
+```{r}
+stop <- stopwords("es") %>%  # palabras comunes para eliminar del análisis
+  as.tibble() ## importante para que sea el mismo tipo de objeto que focus_tokenizado
+
+stop
+```
+
+Otra opción está disponible en un repositorio público y puede ser útil en caso que el paquete anterior nos presente algún error.
+
+```{r, eval=FALSE}
+stop <- read.csv("https://bitsandbricks.github.io/data/stopwords_es.csv",
+                  stringsAsFactors = FALSE)
+```
+
+Volviendo al punto anterior, le cambiamos el nombre a la columna para que se llame igual al del conjunto de datos `focus_tonenizado`
+
+```{r}
+colnames(stop) <- "word"
+```
+
+Sacamos las stop words del DF a través de la función `anti_join()`
+
+```{r}
+focus_tokenizado <- focus_tokenizado %>% 
+                    anti_join(stop)
+```
+
+Mostramos las principales palabras, así como la cantidad de variables y observaciones
+
+```{r}
+str(focus_tokenizado)
+
+focus_tokenizado %>% 
+  count(word, sort = TRUE) %>% 
+  head()
+```
+
+Vemos que aún aparecen palabras que no son clave como iniciales de nombres o "si". Creamos otro objeto para hacer `anti_join()`, y mostramos los datos. Otras palabras que se eliminan surgen del análisis posterior para la identificación de tópicos y resultan en la eliminación de palabras "como", "osea", "okey", etc.
+
+Este paso puede resultar engorroso ya que implica una revisión constante. En los próximos pasos algunas de estas palabras también serán eliminadas.
+
+
+#### Limpiar los datos
+
+Reemplazamos los acentos para unificar criterios. La función `str_replace_all()` detecta palabras o carácteres y los reemplaza. La sintaxis es old = new, siendo old lo que se quiere reemplazar y new cómo será reemplazado. En caso que sean varias modificaciones, como en este caso, se concatenan con la función `c()` quedando de la siguiente manera:
+
+```{r}
+focus_tokenizado$word <- focus_tokenizado$word %>% 
+  str_replace_all(c("á"="a", "é"="e","í"="i","ó"="o", "ú"="u"))
+```
+
+Ahora filtramos palabras cortas, en este caso mayores a 3. Esto es importante porque todas las oraciones de las desgrabaciones comienzan con la inicial de quien habla, entonces esas palabras de 1 o 2 letras aparecen muchas veces como en caso de la letra p que refiere al moderador.
+
+Cabe destacar que se seleccionan las palabras más de 3 carácteres, entonces también se eliminarán palabras que tengan exactamente 3 letras como "que", "ver", "así", etc. Alternativamente, y para conservar estas palabras, el indicador lógico debe ser reemplazado: en vez de `>`, ponemos `>=`, o dejamos la misma sintaxis y cambiamos el número 3 por el 2.
+
+```{r}
+focus_tokenizado <- focus_tokenizado %>% 
+  filter(str_length(word) > 3)
+```
+
+**Este paso es opcional y conviene hacerlo luego de limpiar tíldes y mayusculas**
+
+```{r}
+
+stop2 <- c("osea", "como", "digamos", "masc",
+           "tambien", "okey", "entiende") %>% 
+  as.tibble()
+
+colnames(stop2) <- "word"
+
+focus_tokenizado <- anti_join(focus_tokenizado, stop2)
+
+str(focus_tokenizado)
+
+focus_tokenizado %>% 
+  count(word, sort = TRUE) %>% 
+  head()
+```
+
+
+
+## Análisis Descriptivo y Topic Model
+
+Habiéndo limpiado los datos, podemos visualizar los términos más frecuentes en los Focus. Usamos el enfoque tidyverse para mostrar las principales palabras. Este enfoque es útil para hacer text mining, para visualizar con ggplot2 y para otro tipo de plots.
+
+```{r}
+# Mostramos las principales palabras
+focus_tokenizado %>% count(word, sort = TRUE) %>% head()
+```
+
+#### Frecuencia de palabras y dispersión
+
+Ahora creamos un objeto que llamamos frecuencia para calcular la proporción de cada término en el conjunto de datos. Lo podemos agrupar por una variable de control para verlo gráficamente.
+
+Este primer objeto no toma en cuenta las variables de control, y sirve para después hacer una nube de palabras.
+
+```{r}
+## creamos objeto que calcule la proporción
+frecuencia <- focus_tokenizado %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(proportion = n / sum(n))
+```
+
+Este segundo objeto toma la misma sintaxis, agregando una agrupación por ciudad. Luego se hacen pivots para que nos quede una columna con las proporciones de la ciudad de Cordoba y otra columna con proporciones de las otras dos ciudad para comparar.
+
+```{r}
+freq_ciudad <- focus_tokenizado %>% 
+  group_by(ciudad) %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(proportion = n / sum(n)) %>% 
+  pivot_wider(names_from = ciudad, values_from = proportion) %>% 
+  pivot_longer(`San Francisco`:`Rio Cuarto`,
+               names_to = "ciudad", values_to = "proportion")
+
+h <- ggplot(freq_ciudad, aes(x = proportion, y = Cordoba, 
+                      color = abs(Cordoba - proportion))) +
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(alpha = 0.3, size = 1.5, width = 0.3, height = 0.3) +
+  geom_text(aes(label = word), check_overlap = T, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(limits = c(0, 0.001), 
+                       low = "darkslategray4", high = "gray75") +
+  facet_wrap(~ciudad, ncol = 2) +
+  theme(legend.position="none") +
+  labs(y = "Cordoba Capital", x = NULL)
+
+
+h
+```
+
+Se observa que los términos están bastante concentrados, apriori habría mayores diferencias discursivas entre Cordoba - San Francisco que entre Cordoba - Rio Cuarto.
+
+#### Wordcloud
+
+El paquete `wordcloud`, y su función homónima, nos permiten crear una nube de palabras. El enfoque tidyverse también es útil como input para este tipo de gráfico.
+
+Hay 2 argumentos obligatorios y otros 2 sumamente útiles.
+
+`wordcloud(words,freq,min.freq=3,max.words=Inf, ...)`
+
+`words` referimos la columna que contiene las palabras `freq` sería la columna que contiene la frecuencia con que aparecen las palabras
+
+Los siguientes son optativos, se pueden usar en simultáneo o elegir sólo uno.
+
+`min.freq` la cantidad mínima de veces que aparece una palabra para ser mostrada, el valor por defecto es 3 `max.words` la cantidad máxima de palabras que vamos a mostrar, se eligen las que más aparecen hasta completar el cupo.
+
+Es conveniente mirar los datos y limitar las palabras para que la visualización sea óptima y sirva. Esto se puede hacer eligiendo una frecuencia mínima elevada, por ejemplo si ponemos `min.freq = 200` tendremos alrededor de 40 palabras en la nube.
+
+```{r}
+## Plot de palabras de todos los docs
+frecuencia %>% 
+  with(wordcloud(word, n, max.words = 35))
+```
+
+#### Análisis de frecuencias
+
+Una pregunta escencial en text mining es cómo cuantificamos el contenido de un documento. Una medida que se puede utilizar es *term frequency* (tf) - frecuencia del término, y mide la frecuencia de ocurrencia de un término en un documento.
+
+El problema es que hay muchas palabras que aparecen reiteradas veces pero no son importantes, algunas de ellas las eliminamos previamente con diccionarios de stopwords.
+
+En este sentido, resulta útil utilizar el indicador *inverse document frequency* (idf) para los términos de un documento. El IDF le baja el peso relativo a las palabras más comúnes y lo incrementa a las que menos aparecen. La fórmula que representa este indicador es:
+
+$idf(term)=ln(\frac {n\_{documentos}}{n\_\text{documentos con el término}})$
+
+Estos dos indicadores pueden ser combinados es un estadístico denominado **tf-idf**.
+
+La función `bind_tf_idf()` analiza el contenido del documento, dando menor peso relativo a palabras más usadas.
+
+```{r}
+## The bind_tf_idf() function
+
+word_df <- focus_tokenizado %>% 
+  group_by(n_focus) %>%   
+  count(word, sort = TRUE)
+
+focus_tf_idf <- word_df %>% 
+  bind_tf_idf(word, n_focus, n) %>% 
+  arrange(desc(tf_idf))
+
+focus_tf_idf %>% head(10)
+```
+#### N-grams
+
+```{r}
+## Miramos las oraciones como unidades en vez de palabras
+
+
+sentences <- df_text %>% 
+  unnest_tokens(sentence, text, token = "sentences")
+
+head(sentences)
+```
+
+Ahora tenemos también la posibilidad de Tokenizar cada dos palabras, en lugar de una sola como hicimos antes. Esto nos permitiría observar y graficar algunas relaciones.
+
+```{r}
+## bigrams
+# tokenizamos cada dos palabras
+
+bigrams <- df_text %>% 
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% na.omit()
+
+bigrams %>% count(bigram, sort = T) %>% head()
+```
+
+Vemos nuevamente que las palabras más utilizadas no nos dan ninguna información, así que ahora vamos a separar las palabras en columnas para luego filtrar el contenido.
+
+```{r}
+# separamos para que cada palabra sea una columna
+
+bigrams_separeted <- bigrams %>% 
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filter <- bigrams_separeted %>% 
+  filter(!word1 %in% stop$word,
+         !word1 %in% stop2$word) %>% 
+  filter(!word2 %in% stop$word,
+         !word2 %in% stop2$word) %>% 
+  na.omit()
+
+bigrams_filter %>% 
+  count(word1, word2, sort = TRUE) %>% head()
+```
+
+Ahora las cuentas de palabras que aparecen juntas parecen tener más sentido.
+
+A modo de ejemplo, también dejamos la separación en trigramas. Pero se observará que hay muy pocas observaciones.
+```{r}
+## Trigrams
+
+trigram <- df_text %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop$word,
+         !word1 %in% stop2$word,
+         !word2 %in% stop$word,
+         !word2 %in% stop2$word,
+         !word3 %in% stop$word,
+         !word3 %in% stop2$word
+         ) %>%
+  count(word1, word2, word3, sort = TRUE) %>% na.omit()
+
+head(trigram)
+```
+
+#### Bigramas y redes de palabras
+
+Hasta aquí el paso a paso explicado, ahora generamos un objeto `bigram` que dispone de la tokenización, los filtros y la limpieza todo junto.
+
+```{r}
+## todo junto
+bigram <- df_text %>% 
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  select(n_focus, bigram) %>% 
+  separate(bigram, c("word1", "word2"), sep = " ") %>% 
+  filter(!word1 %in% stop$word,
+         !word2 %in% stop$word,
+         !word1 %in% stop2$word,
+         !word2 %in% stop2$word) %>% 
+  filter(str_length(word1) > 3,
+         str_length(word2) > 3) %>% 
+  na.omit()
+```
+
+Para gráficar estas relaciones, el primer paso es crear un objeto que cuente y ordene los bigramas según su ocurrencia.
+```{r}
+#contar bigramas
+bigram_counts <- bigram %>% 
+  count(word1, word2, sort = TRUE) 
+```
+
+Enseguida, creamos un objeto que transforme nuestro dataframe en un objeto apto para gráficar estas relaciones. Este objeto es básicamente una lista donde cada termino está asociado a otros terminos.
+
+La función `filter()` nos permite elegir cuál es el número mínimo de apariciones que debe tener un bigrama de palabras para que luego sea graficado. Como pusimos **mayor que 9**, el mínimo de apariciones será 10. La función `graph_from_data_frame()` es la que coerce el DF al formato necesario.
+```{r}
+bigram_graph <- bigram_counts %>%
+  filter(n > 9) %>% 
+  na.omit() %>% 
+  graph_from_data_frame()
+```
+
+Ahora una primer versión del gráfico
+```{r}
+set.seed(2017)
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+Ahora, una versión mejorada:
+
+```{r}
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+set.seed(2017)
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+Las flechas con mayor intensidad nos indican que las palabras aparecen en conjunto más veces que aquellas con flechas más transparentes. Además de los nombres propios, se pueden destacar algunas cosas:
+
+- Predominancia de Buenos Aires
+- Obra pública
+- Persona jóven
+
+Es importante destacar que puede tomar cierto tiempo encontrar la medida justa para que la red nos presente sentido. Básicamente se trata de experimentar con el mínimo de apariciones que vamos a requerir en el filtro: a prueba y error. Podemos apoyarnos en medidas de tendencia central para que la elección no sea arbitraria.
+
+```{r}
+summary(bigram_counts$n)
+
+```
+Vemos que en este caso no nos resultan útiles porque la media y la mediana tienen valores similares, incluso hasta el tercer cuartil n = 1 y luego aumentan considerablemente. En otras circunstancias podríamos utilizar el valor de la mediana. 
+
+Por otro lado, podemos usar la construcción del bigrama para filtrar palabras clave.
+```{r}
+## Analisis de bigramas y trigramas
+
+bigram %>%
+  filter(word1 == "juez") %>%
+  count(word2, sort = TRUE) %>% 
+  head()
+
+
+```
+
+Otra forma de ver estas relaciones es a través de las funciones `pairwise_*()`. 
+A continuación presentamos la función `pairwise_count()` que cuenta el número de veces que un ítem aparece junto a otro. En nuestro caso los ítems son palabras, y la ventaja es que el orden no importa
+```{r word_pairs, eval=FALSE}
+## count words co-occuring within sections
+
+word_pairs <- focus_tokenizado %>% 
+  pairwise_count(word, linea, sort = T) %>% 
+  filter(!item1 %in% stop$word,
+         !item1 %in% stop2$word,
+         !item2 %in% stop$word,
+         !item1 %in% stop2$word) %>% 
+  filter(str_length(item1) > 3,
+         str_length(item2) > 3) %>% 
+  filter(n > 19) %>% 
+  na.omit()
+
+word_pairs %>% 
+  filter(item1 == "cordoba")
+```
+
+Por otro lado, la función `pairwise_cor()` nos muestra la correlación lineal entre estos dos ítems.
+```{r}
+## Correlación entre palabras
+
+focus_tokenizado <- anti_join(focus_tokenizado, stop)
+focus_tokenizado <- anti_join(focus_tokenizado, stop2)
+
+word_cors <- focus_tokenizado %>% 
+  group_by(word) %>% 
+  filter(n() > 19) %>% 
+  pairwise_cor(word, linea, sort = T)
+
+head(word_cors)
+
+```
+
+El formato de salida es útil para explorar el conjunto de datos, por lo tanto aquí podemos usar los filtros para enfocar el análisis.
+```{r}
+
+
+word_cors %>% 
+  filter(item1 == "larreta")
+
+
+word_cors %>%
+  filter(item1 %in% c("larreta", "alberto", "juez", "inseguridad")) %>%
+  group_by(item1) %>%
+  slice_max(correlation, n = 7) %>%
+  ungroup() %>%
+  mutate(item2 = reorder(item2, correlation)) %>%
+  ggplot(aes(item2, correlation)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip()
+```
+
+#### Network Correlación
+
+Así como antes visualizamos los bigramas, ahora lo haremos para las correlaciones y clusters de palabras. 
+```{r}
+summary(word_cors$correlation)
+```
+
+La función `summary()` no nos proporciona un indicador útil para elegir el valor mínimo de correlación que queremos visualizar por los bajos niveles de correlación. Se aclara que en otros casos se puede elegir otro valor.
+
+
+```{r}
+set.seed(77)
+
+word_cors %>%
+  filter(correlation > .5) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void()
+```
+
+
+La desventaja de estas funciones es que pueden consumir demasiada memoria en generar una tabla, por eso en esta guía usamos filtros con una cantidad mínima de apariciones.
+
+#### Formato DTM
+
+Tomamos el objeto `word_df` que construimos previamente. Este dataframe tiene 3 variables: `n_focus` es el id del documento, `word` es el termino, y `n` es la cantidad de ocurrencias.
+
+Convertir a formato DTM -Document Term Matrix- nos sirve luego para aplicaciones de Machine Learning.
+```{r}
+
+(word_dtm <- word_df %>% cast_dtm(document = n_focus, 
+                                  term = word, 
+                                  value = n))
+
+```
+
+La función `filter_tf_idf()` filtra los valores con un coeficiente tf_idf bajo. Por defecto, filtra los valores por debajo de la mediana
+
+```{r}
+(word_dtm2 <- gofastr::filter_tf_idf(word_dtm, verbose = TRUE))
+
+```
+
+## Topic Model
+
+Para hacer el modelo usamos la función `LDA()` - "Latent Dirichlet Allocation"
+Esta función requiere de 3 argumentos:
+
+ - `x = ` es el objeto de tipo DTM que creamos recién.
+ - `k = ` es el número de tópicos
+ - `control = ` utilizamos un seed para controlar el output
+
+```{r}
+focus_lda <- LDA(x = word_dtm2, k = 6, control = list(seed = 77))
+```
+
+Esta sería la otra posibilidad sin filtro por valor tf_idf
+```{r echo=FALSE}
+(focus_lda2 <- LDA(word_dtm, k = 6, control = list(seed = 77)))
+```
+
+Ahora vemos como hacer para evaluar y ver los resultados del modelo.
+
+El argumento `matrix = "beta"` nos da la probabilidad $\beta$ -beta- del modelo. Es decir, extraemos la probabilidad por término por documento, denominada $\beta$.
+
+La función tidy nos devuelve esto en un formato que nos sirve para trabajar
+
+```{r}
+(focus_topics <- tidy(focus_lda,           ## objeto tipo LDA - topic model
+                      matrix = "beta"))
+```
+
+Ahora tomamos los términos más relevantes de cada tópico, definimos un n que nos resulte cómodo para gráficar y que nos represente algún valor explicativo.
+```{r}
+focus_top_terms <- focus_topics %>%    # objeto anterior
+  group_by(topic) %>%                  # agrupamos por tópico
+  slice_max(beta, n = 7) %>%           # definimos el máximo de términos que vamos a incluir
+  ungroup() %>%                        # desagrupamos
+  arrange(topic, beta)                # ordenamos
+
+focus_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+Como sabemos que cada documento está guiado, es posible que los tópicos en sí no respondan a un patrón específico inmediatamente observable. 
+
+Por este motivo, extraemos la probabilidad $\gamma$ (gamma) con el argumento `matrix = "gamma"` que nos permite examinar la probabilidad por documento por tópico.
+
+```{r}
+(focus_topics_gamma <- tidy(focus_lda, matrix = "gamma"))
+```
+
+Con el siguiente gráfico podemos observar la probabilidad de un documento sea representado por algún tópico.
+```{r}
+focus_topics_gamma %>%
+  mutate(title = reorder(document, gamma * topic)) %>%
+  ggplot(aes(factor(topic), gamma)) +
+  geom_boxplot() +
+  facet_wrap(~ document) +
+  labs(x = "topic", y = expression(gamma))
+```
+
+Ahora vemos que pueden tener en común estos documentos. 
+
+Para eso, primero seleccionamos tópico para hacer el filtro luego.
+
+El objeto topic_classifications nos muestra, para cada documento, el valor de probabilidad $\gamma$ más elevado. Mientras el objeto `topic_selection` actua como filtro selectivo que nos va a mostrar los documentos que componen cada tópico y la probabilidad.
+
+```{r}
+topic_classifications <- focus_topics_gamma %>%
+  group_by(document) %>%
+  slice_max(gamma) %>%
+  ungroup()
+
+(topic_selection <- subset(topic_classifications, topic == 1))
+```
+
+Filtramos para ver bajo que variables de control entran los focus de cada topico
+```{r}
+focus_categoria <- 
+  
+  ## seleccionamos sólo las variables que nos interesan
+                  df_text[2:6] %>% 
+  
+  ## hacemos la tabla más larga
+  pivot_longer(!n_focus, 
+               names_to = "categ", 
+               values_to = "values") %>% 
+  
+  dplyr::group_by(n_focus, 
+                  values) %>%
+  
+  dplyr::summarise(n = dplyr::n(), 
+                   .groups = "drop") %>% 
+  
+  ## este filtro indica que la variable n_focus esta dentro de los documentos seleccionados en un objeto anterior
+  filter(n_focus %in% topic_selection$document) %>% 
+  
+  ## hacemos la tabla más ancha para visualizar mejor
+  pivot_wider(names_from = values, values_from = n)
+
+focus_categoria
+```
+Por ejemplo, vemos entonces que el tópico 1 se compone mayoritariamente por el grupo etareo de 20 a 30 años, provenientes de Rio Cuarto (por eso también la palabra "francisco" adquiere relevancia), de un segmento socioeconómico medio - bajo y votante de JxC.
+
+
+Si repetimos el procedimiento para los otros tópicos, encontraremos también similitudes en cuanto a cómo las variables de control explican el agrupamiento de términos en un mismo cluster.

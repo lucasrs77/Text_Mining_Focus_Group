@@ -1,0 +1,178 @@
+---
+title: "Topic Model para focus groups"
+author: "Lucas Rodríguez Saa"
+output:
+  powerpoint_presentation:
+  slidy_presentation:
+    incremental: no
+  ioslides_presentation:
+    incremental: no
+    self-included: yes
+  beamer_presentation:
+    incremental: no
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, fig.align='center')
+   
+library("pacman")  
+
+p_load(tidyverse, ggplot2, tm, textreadr, 
+       tidytext, scales, wordcloud, igraph,
+       ggraph, widyr, topicmodels, prettydoc,
+       rticles, xaringan, devtools, here)
+
+source("ppt_code.R", local = knitr::knit_global())
+
+```
+
+## Introducción
+
+En esta presentación veremos las principales formas de visualizar e interpretar los datos que surgen del Text Mining aplicado a las desgrabaciones de los Focus Groups.
+
+Se complementa con la guía dado que nos enfocamos en la visualización e interpretación, y no en el paso a paso.
+
+## Agenda
+
+-   Diagrama de dispersión
+-   Bigramas
+-   Correlación
+-   Topic Model
+
+## Diagrama de dispersión
+
+Este gráfico nos sirve para comparar la dispersión de los términos de dos ciudades en relación a Córdoba Capital.
+
+En San Francisco pareciera haber más dispersión, indicando que una mayor amplitud de palabras y conceptos utilizados que en Rio Cuarto.
+
+En términos cualitativos, resaltan algunas palabras por el uso compartido que tienen estas localidades. Córdoba y SF comparten palabras como "persona", "mauricio", "arreglar". Mientras que Córdoba y RC comparten palabras como "participación" y "buscando"
+
+## Diagrama de dispersión
+
+```{r dispersion, warning=FALSE}
+
+plot(h)
+
+```
+
+## Bigramas: relación entre palabras
+
+Los bigramas muestran la relación entre dos palabras conexas, los gráficos muestran representan la cantidad de veces que aparecen juntas esas palabras.
+
+En el primer gráfico se muestran los bigramas que aparecen más de 10 veces. Mientras en el segundo los que aparecen 25 veces o más.
+
+
+## Bigrama (n = 10)
+
+Se generan algunos clusters interesantes y aparecen también con cierta relevancia conceptos como "obra pública"
+
+```{r bigram_graph}
+plot(bigraf)
+```
+
+## Bigrama (n = 25)
+
+```{r bigram_graph_2}
+plot(bigraf2)
+```
+
+## Bigrama (n = 25)
+
+Aquí se puede ver con mayor claridad los conceptos que tendrían más relevancia.
+
+Se habla de la Clase Media, mucha relevancia de Buenos Aires que llama la atención dado que estos focus son solamente de la provincia de Córdoba. Dejan de aparecer algunos nombres relevantes como HRL y CFK. También parece que, para bien o mal, la realidad nacional les preocupa más: relaciones como nivel-nacional; gobierno-nacional; o, nivel-pais, aparecen mucho más que nivel-provincial.
+
+
+## Correlación entre los términos
+
+La correlación entre los términos evalua como se correlacionan las palabras entre sí en una misma oración. Es similar a la correlación lineal R de Pearson.
+
+Seleccionamos 4 nombres para ver con qué conceptos tienen correlación.
+
+## Plot Correlación
+
+```{r corr}
+plot(pol_word_cor)
+```
+
+## Plot Correlación
+
+-   Se destaca que Larreta correlaciona más con Fernández que con Macri, incluso Larreta tiene una correlación un poco más elevada con Cristina que Macri.
+
+-   La correlación fuerte de Macri con la palabra Buenos, parece ser por Buenos Aires.
+
+-   Oposición sólo aparece ligada a HRL
+
+-   En el gráfico de Juez sólo aparece otra figura relevante: Loredo
+
+-   AF y HRL aparecen ligados a Nacional, uno por gobierno y otro por proyección
+
+## Plot Correlación
+
+
+En este segundo gráfico elegimos 6 términos relacionados a la gestión pública. Hay 4 palabras clave: economía, inseguridad, obra y pandemia, y otras 2 palabras intimamente relacionadas: inflación (a economía) y salud (a pandemia)
+
+```{r corr_2}
+plot(pol_word_cor2)
+
+```
+
+## Plot Correlación
+
+
+-   La única figura que aparece es Alberto Fernández, ligado a la Economía, la Inflación y la Pandemia. Aunque oposición como término genérico también aparece en pandemia.
+
+-   Mientras Economía apunta a cuestiones generales como inflación, al país o la pandemia, también aparece inseguridad. En este mismo sentido, inflación apunta a cuestiones específicas como los impuestos o la plata.
+
+-   Pandemia y salud no aparecen tan ligados entre sí.
+
+-   Al hablar de salud ponen de relieve otros asuntos de política pública como Educación o Seguridad/inseguridad.
+
+
+
+## Red de correlación
+
+Graficamos de forma similar a los bigramas pero estableciendo la correlación en lugar de la cuenta de apariciones conjuntas.
+
+```{r}
+plot(word_net)
+```
+
+## Topic Model
+
+Finalmente, mostramos los términos más relevantes para cada tópico.
+
+```{r}
+plot(focus_top_terms)
+```
+
+## Topic Model: Clasificación
+
+Además de la clasificación según las variables de corte (NSE, voto, ciudad), en algunos casos los términos de un tópico se pueden agrupar en alguna categoría más amplia.
+
+-   Topic 1: palabras asociadas a las instituciones y al gobierno como Votaria, Representado, Diputados, Confianza
+
+La clasificación según las variables de corte asociada nos indica que los tópicos se componen, principalmente, de la siguiente forma:
+
+-   Topic 1: jóvenes, NSE medio-bajo, Rio Cuarto, JxC
+-   Topic 2: NSE medio-alto, JxC
+-   Topic 3: NSE medio-bajo, mixto en el resto
+-   Topic 4: NSE medio-bajo, San Francisco
+-   Topic 5: mayores, NSE medio-alto, Córdoba, HxC
+-   Topic 6: jovenes, NSE medio-alto, Rio Cuarto, JxC
+
+## Topic Model: Gamma
+
+```{r}
+
+(focus_topics_gamma <- tidy(focus_lda, matrix = "gamma") %>% 
+                        mutate(title = reorder(document, gamma * topic)) %>%
+                        ggplot(aes(factor(topic), gamma)) +
+                        geom_boxplot() +
+                        facet_wrap(~ document) +
+                        labs(x = "topic", y = expression(gamma))
+ 
+ )
+
+```
